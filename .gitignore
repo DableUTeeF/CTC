@@ -1,0 +1,6 @@
+.idea/*
+digit_ocr/*
+digit_ocr_LSTM/*
+fonts/*
+image_ocr/*
+weights/*

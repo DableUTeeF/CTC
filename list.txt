@@ -1,0 +1,8 @@
+fonts/calibril.ttf
+fonts/THSarabunNew.ttf
+fonts/calibrii.ttf
+fonts/calibriz.ttf
+fonts/calibri.ttf
+fonts/THSarabun.ttf
+fonts/calibrili.ttf
+fonts/calibrib.ttf
