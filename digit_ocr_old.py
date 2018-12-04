@@ -321,9 +321,9 @@ def update_batch(training_model,
 
     for i in range(batch_size):
         img, txt, txtlen = random_example(digit, face_list, nface, nmax)
-        img = img.astype(np.float) / 127.5 - 1
-
-        batch_x[i, :img.shape[1], :, 0] = img.T
+        img = img.astype(np.float)
+        img = np.rollaxis(img, 1)
+        batch_x[i, :, :, 0] = img
         batch_y[i, :txtlen] = txt
         batch_ylen[i] = txtlen
         batch_declen[i] = 12  # heuristic!!
@@ -342,7 +342,8 @@ def debug(main_model, decoder, unk,
           digit, face_list, nface, nmax):
     img, txt, txtlen = random_example(digit, face_list, nface, nmax)
 
-    x = img.astype(np.float) / 127.5 - 1
+    x = img.astype(np.float)
+    x = np.rollaxis(x, 1)
     out = main_model.predict(x.reshape((1, 224, 36, 1)))
 
     decoded_sequences = decoder([out, np.ones((out.shape[0], 1)) * 14])
@@ -369,7 +370,7 @@ if __name__ == '__main__':
     # parser = argparse.ArgumentParser()
     # parser.add_argument('ttflist', type=str, help="list of ttf")
     # args = parser.parse_args()
-    ttflist = 'calibri.ttf'
+    ttflist = 'list.txt'
     face_list = load_font(ttflist)
     nface = len(face_list)
 
