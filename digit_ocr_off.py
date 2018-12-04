@@ -387,6 +387,19 @@ def decode_batch(test_func, word_batch):
     return ret
 
 
+def decode_batch2(test_func, word_batch):
+    out = test_func([word_batch])[0]
+    ret = []
+    o = []
+    for j in range(out.shape[0]):
+        out_best = list(np.argmax(out[j, 2:], 1))
+        out_best = [k for k, g in itertools.groupby(out_best)]
+        outstr = labels_to_text(out_best)
+        ret.append(outstr)
+        o.append(out_best)
+    return ret, o
+
+
 class VizCallback(keras.callbacks.Callback):
 
     def __init__(self, run_name, test_func, text_img_gen, num_display_words=6):
@@ -553,13 +566,13 @@ def train(run_name, start_epoch, stop_epoch, img_w):
         callbacks=[viz_cb, img_gen, tensorboard],
         initial_epoch=start_epoch)
 
-
-if __name__ == '__main__':
-    run_name = datetime.datetime.now().strftime('%Y:%m:%d:%H:%M:%S')
-    train(run_name, 0, 20, 128)
-    # train(run_name, 3, 6, 256)
-    # train(run_name, 6, 9, 384)
-    # train(run_name, 9, 20, 416)
-    # increase to wider images and start at epoch 20.
-    # The learned weights are reloaded
-    train(run_name, 20, 25, 512)
+#
+# if __name__ == '__main__':
+#     run_name = datetime.datetime.now().strftime('%Y:%m:%d:%H:%M:%S')
+#     train(run_name, 0, 20, 128)
+#     # train(run_name, 3, 6, 256)
+#     # train(run_name, 6, 9, 384)
+#     # train(run_name, 9, 20, 416)
+#     # increase to wider images and start at epoch 20.
+#     # The learned weights are reloaded
+#     train(run_name, 20, 25, 512)
