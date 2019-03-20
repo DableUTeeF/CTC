@@ -84,11 +84,11 @@ def create_cairo_font_face_for_file(filename, faceindex=0, loadoptions=0):
         # general case.
         if _cairo_so.cairo_font_face_get_user_data(cr_face, ct.byref(_ft_destroy_key)) is None:
             status = _cairo_so.cairo_font_face_set_user_data(
-                    cr_face,
-                    ct.byref(_ft_destroy_key),
-                    ft_face,
-                    _freetype_so.FT_Done_Face
-                )
+                cr_face,
+                ct.byref(_ft_destroy_key),
+                ft_face,
+                _freetype_so.FT_Done_Face
+            )
             if status != CAIRO_STATUS_SUCCESS:
                 raise RuntimeError("Error %d doing user_data dance for %s" % (status, filename))
             # end if
@@ -145,10 +145,7 @@ def text2img(text, face, dense):
     yy0, yy1 = 100, 100
 
     x0, y0 = ctx.get_current_point()
-    h = 0
     if dense:
-        ybearing = 0
-        height = 0
         for c in text:
             xb, yb, w, h, dxc, dyc = ctx.text_extents(c)
 
@@ -214,17 +211,18 @@ def degrade(img):
 ####################################################################################################################################
 def random_example(digit, face_list, nface, nmax):
     while True:
-        l = 5 + np.random.randint(5)
+        l = np.random.randint(nmax//2, high=nmax)
         if l < nmax:
             break
 
     s, t = '', []
     for j in range(l):
-        j = np.random.randint(10)
+        j = np.random.choice(range(len(alphabet)))-1
         s = s + digit[j]
-        t.append(j)
+        t.append(digit[j])
 
-    ii = text2img(s, face_list[np.random.randint(nface)], np.random.choice([True, False], p=[0.1, 0.9]))
+    # ii = text2img(s, face_list[np.random.randint(nface)], np.random.choice([True, False], p=[0.1, 0.9]))
+    ii = text2img(s, face_list[np.random.randint(nface)], False)
     ii = degrade(ii)
 
     oo = cv2.resize(ii, (224, 36), cv2.INTER_AREA)
@@ -236,14 +234,16 @@ def random_example(digit, face_list, nface, nmax):
 from keras import backend as K
 from keras.models import Model
 from keras.layers import (Conv2D, Input, Dense, Activation,
-                          Reshape, Lambda, LSTM, TimeDistributed,
-                          BatchNormalization, Permute)
-
+                          Reshape, Lambda, GRU, MaxPooling2D,
+                          concatenate, add)
 from keras.optimizers import SGD
 
 
 def ctc_lambda_func(args):
     y_pred, labels, input_length, label_length = args
+    # the 2 is critical here since the first couple outputs of the RNN
+    # tend to be garbage:
+    y_pred = y_pred[:, 2:, :]
     return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
 
 
@@ -259,32 +259,48 @@ def ctc_decode(args):
 # output shape (max_str_len, nchar)
 def construct_model(w, h, max_str_len, nchar):
     # construct main model
-    x = Input(name='the_input', shape=(w, h, 1))
+    input_shape = (w, h, 1)
+    conv_filters = 16
+    kernel_size = (3, 3)
+    pool_size = 2
+    time_dense_size = 32
+    rnn_size = 512
+    act = 'relu'
 
-    y = Conv2D(32, (3, 3), padding='same', strides=(2, 2), data_format='channels_last')(x)  # -> (18, 112, 32)
-    y = BatchNormalization()(y)
-    y = Activation('relu')(y)
+    x = Input(name='the_input', shape=input_shape, dtype='float32')
+    inner = Conv2D(16, kernel_size, padding='same',
+                   activation=act, kernel_initializer='he_normal',
+                   name='conv1')(x)
+    inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max1')(inner)
+    inner = Conv2D(16, kernel_size, padding='same',
+                   activation=act, kernel_initializer='he_normal',
+                   name='conv2')(inner)
+    inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max2')(inner)
 
-    y = Conv2D(32, (3, 3), padding='same')(y)
-    y = BatchNormalization()(y)
-    y = Activation('relu')(y)
+    conv_to_rnn_dims = (w // (pool_size ** 2),
+                        (h // (pool_size ** 2)) * conv_filters)
+    inner = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(inner)
 
-    y = Conv2D(32, (3, 3), padding='same', strides=(2, 2))(y)  # -> (9, 56, 32)
-    y = BatchNormalization()(y)
-    y = Activation('relu')(y)
+    # cuts down input size going into RNN:
+    inner = Dense(time_dense_size, activation=act, name='dense1')(inner)
 
-    y = Conv2D(32, (3, 3), padding='same')(y)
-    y = BatchNormalization()(y)
-    y = Activation('relu')(y)
+    # Two layers of bidirectional GRUs
+    # GRU seems to work as well, if not better than LSTM:
+    gru_1 = GRU(rnn_size, return_sequences=True,
+                kernel_initializer='he_normal', name='gru1')(inner)
+    gru_1b = GRU(rnn_size, return_sequences=True,
+                 go_backwards=True, kernel_initializer='he_normal',
+                 name='gru1_b')(inner)
+    gru1_merged = add([gru_1, gru_1b])
+    gru_2 = GRU(rnn_size, return_sequences=True,
+                kernel_initializer='he_normal', name='gru2')(gru1_merged)
+    gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True,
+                 kernel_initializer='he_normal', name='gru2_b')(gru1_merged)
 
-    # for digit, we only perform elastic deform in X
-    y = Permute((3, 2, 1))(y)  # -> (8, 9, 56)
-    y = TimeDistributed(LSTM(28, return_sequences=True))(y)  # -> elastic deformation on w -> (8, 9, 28))
-    y = TimeDistributed(LSTM(14, return_sequences=True))(y)  # -> elastic deformation on w -> (8, 9, 28))
-    y = Permute((3, 2, 1))(y)  # -> (56, 9, 8)
-
-    y = Reshape((14, 32 * 9))(y)  # -> (56, 9*8)
-    z = TimeDistributed(Dense(nchar, activation='softmax'))(y)
+    # transforms RNN output to character activations:
+    inner = Dense(11, kernel_initializer='he_normal',
+                  name='dense2')(concatenate([gru_2, gru_2b]))
+    z = Activation('softmax', name='softmax')(inner)
 
     main_model = Model(inputs=[x], outputs=[z])
 
@@ -303,7 +319,8 @@ def construct_model(w, h, max_str_len, nchar):
 
     # additional model for decoding
     dec = Lambda(ctc_decode, output_shape=[None, ], name='decoder')([z, input_length])
-    decoder = K.function([z, input_length], [dec])
+    # decoder = K.function([z, input_length], [dec])  # todo: this is the old one
+    decoder = K.function([x], [z])
 
     return main_model, model, decoder
 
@@ -321,70 +338,136 @@ def update_batch(training_model,
 
     for i in range(batch_size):
         img, txt, txtlen = random_example(digit, face_list, nface, nmax)
-        img = img.astype(np.float) / 127.5 - 1
-
-        batch_x[i, :img.shape[1], :, 0] = img.T
-        batch_y[i, :txtlen] = txt
+        img = img.astype(np.float) / 255.
+        # print(img.shape)
+        img = np.rollaxis(img, 1)
+        batch_x[i, :, :, 0] = img
+        batch_y[i, :txtlen] = digit.index(txt)
         batch_ylen[i] = txtlen
         batch_declen[i] = 12  # heuristic!!
 
     inputs = {'the_input': batch_x,
               'the_labels': batch_y,
               'input_length': batch_declen,
-              'label_length': batch_ylen
+              'label_length': batch_ylen,
               }
     outputs = {'ctc': np.zeros([batch_size, 1])}  # dummy data for dummy loss function
 
-    training_model.train_on_batch(inputs, outputs)
+    return training_model.train_on_batch(inputs, outputs)
+
+
+import itertools
+alphabet = u'กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรฤลฦวศษสหฬอฮ๑๒๓๔๕๖๗๘๙๐0123456789 '
+
+
+def labels_to_text(labels):
+    ret = []
+    for c in labels:
+        if c == len(alphabet):  # CTC Blank
+            ret.append("")
+        else:
+            ret.append(alphabet[c])
+    return "".join(ret)
+
+
+def decode_batch(test_func, word_batch):
+    out = test_func([word_batch])[0]
+    ret = []
+    for j in range(out.shape[0]):
+        out_best = list(np.argmax(out[j, 2:], 1))
+        out_best = [k for k, g in itertools.groupby(out_best)]
+        outstr = labels_to_text(out_best)
+        ret.append(outstr)
+    return ret
 
 
 def debug(main_model, decoder, unk,
           digit, face_list, nface, nmax):
     img, txt, txtlen = random_example(digit, face_list, nface, nmax)
 
-    x = img.astype(np.float) / 127.5 - 1
-    x = x.T
-    out = main_model.predict(x.reshape((1, 224, 36, 1)))
-
-    decoded_sequences = decoder([out, np.ones((out.shape[0], 1)) * 14])
-    decoded_sequences = decoded_sequences[0][0]
-    outtxt = ''
-    for i in decoded_sequences.tolist():
-        if i == unk:
-            outtxt = outtxt + ' '
-        else:
-            outtxt = outtxt + digit[i]
+    x = img.astype(np.float) / 255.
+    # todo: old
+    # out = main_model.predict(x.reshape((1, 224, 36, 1)))
+    #
+    # decoded_sequences = decoder([out, np.ones((out.shape[0], 1)) * 14])
+    # decoded_sequences = decoded_sequences[0][0]
+    # todo: new
+    x = np.rollaxis(x, 1)
+    res = decode_batch(decoder, x.reshape((1, 224, 36, 1)))
+    outtxt = res
+    # for i in res:
+    #     if i == unk:
+    #         outtxt = outtxt + ' '
+    #     else:
+    #         outtxt = outtxt + digit[i]
 
     print(txt, ' VS ', outtxt)
     cv2.imshow("debug", img)
     cv2.waitKey(-1)
 
 
-####################################################################################################################################
-####################################################################################################################################
-from tqdm import trange
-import argparse
-
 if __name__ == '__main__':
-
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('ttflist', type=str, help="list of ttf")
-    # args = parser.parse_args()
     ttflist = 'list.txt'
     face_list = load_font(ttflist)
     nface = len(face_list)
 
-    digit = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+    digit = list(alphabet[:-1])
 
-    main_model, training_model, decoder = construct_model(224, 36, 30, 11)  # +unk
+    main_model, training_model, decoder = construct_model(224, 36, 16, 11)  # todo: Official use max_str_len=16 from 30
     main_model.summary()
     training_model.summary()
+    l = 0
 
-    for i in trange(5000):
-        update_batch(training_model, 30, 10,
-                     digit, face_list, nface, 10,
-                     8)
+    # todo: new
+    from digit_ocr_off import DigitImageGenerator
 
+    minibatch_size = 32
+    img_w = 224
+    img_h = 36
+    pool_size = 2
+    words_per_epoch = 16000
+    val_words = int(words_per_epoch * 0.2)
+    img_gen = DigitImageGenerator(
+        monogram_file='',
+        bigram_file='',
+        minibatch_size=minibatch_size,
+        img_w=img_w,
+        img_h=img_h,
+        downsample_factor=(pool_size ** 2),
+        val_split=words_per_epoch - val_words)
+
+    # training_model.fit_generator(
+    #     generator=img_gen.next_train(),
+    #     steps_per_epoch=(words_per_epoch - val_words) // minibatch_size,
+    #     epochs=20,
+    #     validation_data=img_gen.next_val(),
+    #     validation_steps=val_words // minibatch_size,
+    #     callbacks=[img_gen],
+    #     initial_epoch=0)
+    # main_model.save_weights('weights/main_model.h5')
+    # training_model.save_weights('weights/training_model.h5')
+    # main_model.load_weights('weights/main_model.h5')
+    # training_model.load_weights('weights/training_model.h5')
+    #
+    # main_model.save('weights/main_model_.h5')
+    # training_model.save('weights/training_model_.h5')
+    img_gen.on_train_begin(0)
+    img_gen.on_epoch_begin(0)
+    for i in range(5000):
+        try:
+            nmax = i // 1000 + 3
+            loss = update_batch(training_model, 16, nmax,
+                                digit, face_list, nface, 10,
+                                8)
+            # inputs, outputs = img_gen.next_train().__next__()
+            # loss = training_model.train_on_batch(inputs, outputs)
+            l += loss
+            print('\033[96m'f'{i+1}/5000: {l / (i+1)} : {loss}''\033[0m', end='\r')
+            # if loss < 1e-4:
+            #     break
+        except KeyboardInterrupt:
+            break
+    print()
     for i in range(5):
-        debug(main_model, decoder, 10,
-              digit, face_list, nface, 10)
+        debug(main_model, decoder, 5,
+              digit, face_list, nface, 5)
