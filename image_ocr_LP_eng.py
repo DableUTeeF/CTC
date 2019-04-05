@@ -63,8 +63,8 @@ OUTPUT_DIR = 'image_ocr_LP'
 
 # character classes and matching regex filter
 regex = r'^[a-z ]+$'
-# alphabet = u'abcdefghijklmnopqrstuvwxyz '
-alphabet = u'กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรฤลฦวศษสหฬอฮ๑๒๓๔๕๖๗๘๙๐0123456789 '
+alphabet = u'ABCDEFTHIJKLMNOPQRSTUVWXYZ0123456789 '
+# alphabet = u'กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรฤลฦวศษสหฬอฮ๑๒๓๔๕๖๗๘๙๐0123456789 '
 
 np.random.seed(55)
 
@@ -81,6 +81,7 @@ def speckle(img):
     img_speck[img_speck <= 0] = 0
     if np.random.rand() > 0.5:
         img_speck = 1 - img_speck
+
     return img_speck
 
 
@@ -96,13 +97,14 @@ def paint_text(text, w, h, rotate=False, ud=False, multi_fonts=False):
     context.paint()
     # this font list works in CentOS 7
     if multi_fonts:
-        fonts = ["Sarun's ThangLuang"]
+        fonts = [
+            'LICENSE PLATE USA', 'Courier', 'FreeMono']
         context.select_font_face(
             np.random.choice(fonts),
             cairo.FONT_SLANT_NORMAL,
             np.random.choice([cairo.FONT_WEIGHT_BOLD, cairo.FONT_WEIGHT_NORMAL]))
     else:
-        context.select_font_face("Sarun's ThangLuang",
+        context.select_font_face('LICENSE PLATE USA',
                                  cairo.FONT_SLANT_NORMAL,
                                  cairo.FONT_WEIGHT_BOLD)
     context.set_font_size(25)
@@ -227,11 +229,8 @@ class TextImageGenerator(keras.callbacks.Callback):
 
         def random_word():
             length = np.random.randint(1, 5)
-            alphabet = u'กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรฤลฦวศษสหฬอฮ'
-            if np.random.rand() < 0.5:
-                number = '0123456789'
-            else:
-                number = '๑๒๓๔๕๖๗๘๙๐'
+            alphabet = u'ABCDEFTHIJKLMNOPQRSTUVWXYZ0123456789 '
+            number = '0123456789'
             string = ''
             string += alphabet[np.random.randint(len(alphabet) - 1)]
             string += alphabet[np.random.randint(len(alphabet) - 1)]
@@ -539,7 +538,7 @@ def train(run_name, start_epoch, stop_epoch, img_w, img_h=40):
 
 if __name__ == '__main__':
     run_name = datetime.datetime.now().strftime('%Y:%m:%d:%H:%M:%S')
-    train(run_name, 0, 50, 108)
+    train(run_name, 0, 50, 224)
     # increase to wider images and start at epoch 20.
     # The learned weights are reloaded
     # train(run_name, 20, 25, 512)

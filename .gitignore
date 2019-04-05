@@ -3,4 +3,5 @@ digit_ocr/*
 digit_ocr_LSTM/*
 fonts/*
 image_ocr/*
+image_ocr_LP/*
 weights/*
