@@ -1,120 +1,179 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
-import cairo
 import numpy as np
-from scipy import ndimage
 from keras.preprocessing import image
-from matplotlib.font_manager import FontProperties
-# matplotlib.rc('font', family="Lohit Devanagari")
+import cv2
+from PIL import Image, ImageFont, ImageDraw
+import albumentations
+import os
 
-prop = FontProperties(size=16)
-prop.set_file('fonts/Sarun_ThangLuang.ttf')
-OUTPUT_DIR = 'image_ocr_LP'
+provinces = ['กรุงเทพมหานคร.', 'เชียงราย.', 'เชียงใหม่.', 'น่าน.', 'พะเยา.', 'แพร่.',
+             'แม่ฮ่องสอน.', 'ลำปาง.', 'ลำพูน.', 'อุตรดิตถ์.', 'กาฬสินธุ์.',
+             'ขอนแก่น.', 'ชัยภูมิ.', 'นครพนม.', 'นครราชสีมา.', 'บึงกาฬ.',
+             'บุรีรัมย์.', 'มหาสารคาม.', 'มุกดาหาร.', 'ยโสธร.', 'ร้อยเอ็ด.',
+             'เลย.', 'สกลนคร.', 'สุรินทร์.', 'ศรีสะเกษ.', 'หนองคาย.',
+             'หนองบัวลำภู.', 'อุดรธานี.', 'อุบลราชธานี.', 'อำนาจเจริญ.',
+             'กำแพงเพชร.', 'ชัยนาท.', 'นครนายก.', 'นครปฐม.', 'นครสวรรค์.',
+             'นนทบุรี.', 'ปทุมธานี.', 'พระนครศรีอยุธยา.', 'พิจิตร.', 'พิษณุโลก.',
+             'เพชรบูรณ์.', 'ลพบุรี.', 'สมุทรปราการ.', 'สมุทรสงคราม.', 'สมุทรสาคร.',
+             'สิงห์บุรี.', 'สุโขทัย.', 'สุพรรณบุรี.', 'สระบุรี.', 'อ่างทอง.',
+             'อุทัยธานี.', 'จันทบุรี.', 'ฉะเชิงเทรา.', 'ชลบุรี.', 'ตราด.',
+             'ปราจีนบุรี.', 'ระยอง.', 'สระแก้ว.', 'กาญจนบุรี.', 'ตาก.',
+             'ประจวบคีรีขันธ์.', 'เพชรบุรี.', 'ราชบุรี.', 'กระบี่.', 'ชุมพร.',
+             'ตรัง.', 'นครศรีธรรมราช.', 'นราธิวาส.', 'ปัตตานี.', 'พังงา.',
+             'พัทลุง.', 'ภูเก็ต.', 'ระนอง.', 'สตูล.', 'สงขลา.',
+             'สุราษฎร์ธานี.', 'ยะลา']
+offsets = [45, 85, 85, 110, 100, 110,
+           70, 100, 105, 85, 85,
+           85, 100, 85, 70, 100,
+           100, 65, 70, 85, 85,
+           110, 85, 90, 85, 85,
+           65, 85, 65, 65,
+           65, 100, 85, 80, 85,
+           100, 100, 45, 105, 85,
+           85, 100, 60, 60, 65,
+           95, 95, 80, 95, 95,
+           90, 95, 85, 100, 100,
+           90, 100, 90, 90, 110,
+           50, 85, 90, 100, 100, 100,
+           110, 45, 75, 85, 100,
+           100, 100, 100, 110, 100,
+           60, 100
+           ]
 
-# character classes and matching regex filter
-regex = r'^[a-z ]+$'
-# alphabet = u'abcdefghijklmnopqrstuvwxyz '
-alphabet = u'กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรฤลฦวศษสหฬอฮ๑๒๓๔๕๖๗๘๙๐0123456789 '
+# Graphich Plate BG
+bg = cv2.imread('misc/scoop-4-1.jpg')
+bg_ = []
+for ymin in [5, 147, 298, 450, 601]:
+    bg_.append(cv2.resize(bg[ymin:ymin + 86, 1:201], (270, 120)))
+    bg_.append(cv2.resize(bg[ymin:ymin + 86, 207:405], (270, 120)))
+    bg_.append(cv2.resize(bg[ymin:ymin + 86, 1:201], (270, 120))[..., ::-1])
+    bg_.append(cv2.resize(bg[ymin:ymin + 86, 207:405], (270, 120))[..., ::-1])
 
-np.random.seed(55)
+fontpath = "./fonts/Sarun_ThangLuang.ttf"
+fontpaths = ["./fonts/Sarun_ThangLuang.ttf", "./fonts/THSarabun.ttf", "./fonts/basis.ttf", "./fonts/CSChatThai.ttf"]
+font = ImageFont.truetype(fontpath, 80)
+font2 = ImageFont.truetype(fontpath, 35)
+fonts = [ImageFont.truetype(f, 80) for f in fontpaths]
+fonts2 = [ImageFont.truetype(f, 35) for f in fontpaths]
+upper_offsets = [{7: 15, 6: 30, 5: 45, 4: 60, -1: 75, 0: -60, 'p': 40},
+                 {7: 35, 6: 50, 5: 65, 4: 80, -1: 95, 0: -20, 'p': 60},
+                 {7: 45, 6: 60, 5: 75, 4: 90, -1: 105, 0: -20, 'p': 60},
+                 {7: 45, 6: 60, 5: 75, 4: 90, -1: 105, 0: -20, 'p': 60},
+
+                 ]
+
+# Augmented real world BG
+abg = {}
+abg_list = os.listdir('/media/palm/data/openimage/vrp')
+while len(abg) < 100:
+    path = np.random.choice(abg_list)
+    abg[path] = cv2.imread(os.path.join('/media/palm/data/openimage/vrp', path))
+aname = list(abg)
 
 
-# this creates larger "blotches" of noise which look
-# more realistic than just adding gaussian noise
-# assumes greyscale with pixels ranging from 0 to 1
-
-def speckle(img):
-    severity = np.random.uniform(0, 0.6)
-    blur = ndimage.gaussian_filter(np.random.randn(*img.shape) * severity, 1)
-    img_speck = (img + blur)
-    img_speck[img_speck > 1] = 1
-    img_speck[img_speck <= 0] = 0
-    if np.random.rand() > 0.5:
-        img_speck = 1 - img_speck
-    return img_speck
-
-
-# paints the string in a random location the bounding box
-# also uses a random font, a slight random rotation,
-# and a random amount of speckle noise
-
-def paint_text(text, w, h, rotate=False, ud=False, multi_fonts=False):
-    surface = cairo.ImageSurface(cairo.FORMAT_RGB24, w, h)
-    # with cairo.Context(surface) as context:
-    context = cairo.Context(surface)
-    context.set_source_rgb(1, 1, 1)  # White
-    context.paint()
-    # this font list works in CentOS 7
-    if multi_fonts:
-        fonts = ["Sarun's ThangLuang"]
-        context.select_font_face(
-            np.random.choice(fonts),
-            cairo.FONT_SLANT_NORMAL,
-            np.random.choice([cairo.FONT_WEIGHT_BOLD, cairo.FONT_WEIGHT_NORMAL]))
+def random_bg():
+    if np.random.randn() > 0.50:
+        content = bg_[np.random.randint(0, len(bg_))]
+        mil = 0
     else:
-        context.select_font_face("Sarun's ThangLuang",
-                                 cairo.FONT_SLANT_NORMAL,
-                                 cairo.FONT_WEIGHT_BOLD)
-    context.set_font_size(50)
-    box = context.text_extents(text)
-    border_w_h = (4, 4)
-    if box[2] > (w - 2 * border_w_h[1]) or box[3] > (h - 2 * border_w_h[0]):
-        raise IOError(('Could not fit string into image.'
-                       'Max char count is too large for given image width.'))
-
-    # teach the RNN translational invariance by
-    # fitting text box randomly on canvas, with some room to rotate
-    max_shift_x = w - box[2] - border_w_h[0]
-    max_shift_y = h - box[3] - border_w_h[1]
-    top_left_x = np.random.randint(0, int(max_shift_x))
-    top_left_y = h // 2
-    context.move_to(0 - int(box[0]), 0 - int(box[1]))
-    context.set_source_rgb(0, 0, 0)
-    context.show_text(text)
-
-    buf = surface.get_data()
-    a = np.frombuffer(buf, np.uint8)
-    a.shape = (h, w, 4)
-    a = a[:, :, 0]  # grab single channel
-    return a, box
+        content = np.zeros((120, 270, 3), dtype='uint8') + np.random.randint(150, 200)
+        mil = 1
+    return content, mil
 
 
-def shuffle_mats_or_lists(matrix_list, stop_ind=None):
-    ret = []
-    assert all([len(i) == len(matrix_list[0]) for i in matrix_list])
-    len_val = len(matrix_list[0])
-    if stop_ind is None:
-        stop_ind = len_val
-    assert stop_ind <= len_val
+def random_auged_bg():
+    idx = np.random.randint(100)
+    x = np.random.randint(abg[aname[idx]].shape[1] - 350)
+    y = np.random.randint(abg[aname[idx]].shape[0] - 200)
+    bg = abg[aname[idx]][y:y + 200, x:x + 350, :]
+    bg = image.random_rotation(bg, 10)
 
-    a = list(range(stop_ind))
-    np.random.shuffle(a)
-    a += list(range(stop_ind, len_val))
-    for mat in matrix_list:
-        if isinstance(mat, np.ndarray):
-            ret.append(mat[a])
-        elif isinstance(mat, list):
-            ret.append([mat[i] for i in a])
+    return bg
+
+
+def aug_img(img):
+    annotations = {'image': img}
+    aug = albumentations.Compose([
+        albumentations.GaussNoise(p=1),
+        albumentations.MotionBlur(p=1),
+        albumentations.Rotate(5),
+        albumentations.OpticalDistortion(p=1),
+        albumentations.IAAPerspective(scale=(0.005, 0.01), p=1),
+        albumentations.CLAHE(p=1),
+        albumentations.RandomBrightnessContrast(p=1)
+    ])
+    augmented = aug(**annotations)
+    return augmented['image']
+
+
+def paint_text(text, w, p, aug=False, test=False, useabg=False, randfont=False):
+    img, white = random_bg()
+    mil = (np.random.randn() > 0.8) & white & ord(text[-1]) > 300
+    # a = cv2.putText(bg_im)
+    if mil:
+        r = g = b = 0
+    else:
+        c = np.random.randn()
+        if c < 0.4:
+            r = g = b = 0
+        elif c < 0.75:
+            r = 0
+            g = 100
+            b = 10
         else:
-            raise TypeError('`shuffle_mats_or_lists` only supports '
-                            'numpy.array and list objects.')
-    return ret
+            r = g = 0
+            b = 128
+    cv2.rectangle(img, (0, 0), (266, 115), (r, g, b), 4)
 
+    img_pil = Image.fromarray(img)
+    draw = ImageDraw.Draw(img_pil)
 
-# Translation of characters to unique integer values
-def text_to_labels(text):
-    ret = []
-    for char in text:
-        ret.append(alphabet.find(char))
-    return ret
+    if not randfont:
+        choice = 0
+        f = font
+        f2 = font2
+    else:
+        choice = np.random.randint(len(fonts))
+        # choice = 2
+        f = fonts[choice]
+        f2 = fonts2[choice]
 
+    if len(text) == 7:
+        upper_off = upper_offsets[choice][7]
+    elif len(text) == 6:
+        upper_off = upper_offsets[choice][6]
+    elif len(text) == 5:
+        upper_off = upper_offsets[choice][5]
+    elif len(text) == 4:
+        upper_off = upper_offsets[choice][4]
+    else:
+        upper_off = upper_offsets[choice][-1]
 
-# Reverse translation of numerical classes back to characters
-def labels_to_text(labels):
-    ret = []
-    for c in labels:
-        if c == len(alphabet):  # CTC Blank
-            ret.append("")
-        else:
-            ret.append(alphabet[c])
-    return "".join(ret)
+    draw.text((upper_off, upper_offsets[choice][0]), text, font=f, fill=(r, g, b, 255))
+    province = provinces[p]
+    draw.text((offsets[p] + np.random.randint(-5, 5), upper_offsets[choice]['p']), province, font=f2, fill=(r, g, b, 255))
+
+    if useabg:
+        img_pil = img_pil.resize((np.random.randint(120, 290), np.random.randint(90, 150)))
+        degree = np.random.randint(-20, 20)
+        mask = Image.new('L', img_pil.size, 255)
+        img_pil = img_pil.rotate(degree, expand=True)
+        mask = mask.rotate(degree, expand=True)
+        bg = Image.fromarray(random_auged_bg())
+        bg.paste(img_pil, (np.random.randint(50), np.random.randint(50)), mask=mask)
+        img_pil = bg.resize((270, 120))
+
+    img = np.array(img_pil)
+    if np.random.randn() > 0.75 and not useabg:
+        img = image.random_rotation(img, 3 * w / w + 1)
+    if aug:
+        img = aug_img(img)
+    alpha = 255
+    if not test:
+        img = img.astype('float32') / 255.
+        alpha = 1.
+
+    if mil:
+        img = alpha - img
+    return img
