@@ -22,7 +22,7 @@ provinces = ['กรุงเทพมหานคร.', 'เชียงรา�
              'ประจวบคีรีขันธ์.', 'เพชรบุรี.', 'ราชบุรี.', 'กระบี่.', 'ชุมพร.',
              'ตรัง.', 'นครศรีธรรมราช.', 'นราธิวาส.', 'ปัตตานี.', 'พังงา.',
              'พัทลุง.', 'ภูเก็ต.', 'ระนอง.', 'สตูล.', 'สงขลา.',
-             'สุราษฎร์ธานี.', 'ยะลา']
+             'สุราษฎร์ธานี.', 'ยะลา.', 'เบตง.']
 offsets = [45, 85, 85, 110, 100, 110,
            70, 100, 105, 85, 85,
            85, 100, 85, 70, 100,
@@ -35,10 +35,10 @@ offsets = [45, 85, 85, 110, 100, 110,
            95, 95, 80, 95, 95,
            90, 95, 85, 100, 100,
            90, 100, 90, 90, 110,
-           50, 85, 90, 100, 100, 100,
+           50, 85, 90, 100, 100,
            110, 45, 75, 85, 100,
            100, 100, 100, 110, 100,
-           60, 100
+           60, 100, 100
            ]
 
 # Graphich Plate BG
@@ -56,8 +56,8 @@ font = ImageFont.truetype(fontpath, 80)
 font2 = ImageFont.truetype(fontpath, 35)
 fonts = [ImageFont.truetype(f, 80) for f in fontpaths]
 fonts2 = [ImageFont.truetype(f, 35) for f in fontpaths]
-upper_offsets = [{7: 15, 6: 30, 5: 45, 4: 60, -1: 75, 0: -60, 'p': 40},
-                 {7: 35, 6: 50, 5: 65, 4: 80, -1: 95, 0: -20, 'p': 60},
+upper_offsets = [{7: 15, 6: 30, 5: 45, 4: 60, -1: 75, 0: -60, 'p': 50},
+                 {7: 35, 6: 50, 5: 65, 4: 80, -1: 95, 0: -20, 'p': 70},
                  {7: 45, 6: 60, 5: 75, 4: 90, -1: 105, 0: -20, 'p': 60},
                  {7: 45, 6: 60, 5: 75, 4: 90, -1: 105, 0: -20, 'p': 60},
 
@@ -72,7 +72,44 @@ while len(abg) < 100:
 aname = list(abg)
 
 
-def random_bg():
+# Use Phiket image
+pk_list = []
+for aa in open('misc/Phuket_car.csv').readlines():
+    aaa = aa[:-1].split(',')
+    if aaa[-4] == '-' or aaa[-3] == 'ไม่เห็นป้าย':
+        continue
+    lt = aaa[-4]
+    if aaa[1] == 'รถบรรทุก':
+        letter = lt[:2]+' '+lt[2:]
+    else:
+        first_group = ''
+        last_group = ''
+        for i, l in enumerate(lt):
+            if i == 0:
+                first_group += l
+            elif ord(l) > 57:
+                first_group += l
+            else:
+                last_group += l
+        letter = first_group + ' ' + last_group
+    if os.path.exists(os.path.join('LP', aaa[0])):
+        pk_list.append((aaa[0], letter, provinces.index(aaa[-3]+'.')))
+
+
+def random_pk_image():
+    """
+    :return: an image, plate letters, province
+    """
+    a = pk_list[np.random.randint(len(pk_list))]
+    return cv2.resize(cv2.imread(os.path.join('LP', a[0]))[..., ::-1], (270, 120)), a[1], a[2]
+
+
+def random_bg(truck=False):
+    if truck:
+        content = np.zeros((180, 310, 3), dtype='uint8')
+        content[..., 0] += 170
+        content[..., 1] += 120
+        return content, 0
     if np.random.randn() > 0.50:
         content = bg_[np.random.randint(0, len(bg_))]
         mil = 0
@@ -92,11 +129,11 @@ def random_auged_bg():
     return bg
 
 
-def aug_img(img):
+def aug_img(img, blur_limit=7):
     annotations = {'image': img}
     aug = albumentations.Compose([
         albumentations.GaussNoise(p=1),
-        albumentations.MotionBlur(p=1),
+        albumentations.MotionBlur(p=1, blur_limit=blur_limit),
         albumentations.Rotate(5),
         albumentations.OpticalDistortion(p=1),
         albumentations.IAAPerspective(scale=(0.005, 0.01), p=1),
@@ -131,13 +168,10 @@ def paint_text(text, w, p, aug=False, test=False, useabg=False, randfont=False):
 
     if not randfont:
         choice = 0
-        f = font
-        f2 = font2
     else:
         choice = np.random.randint(len(fonts))
-        # choice = 2
-        f = fonts[choice]
-        f2 = fonts2[choice]
+    f = fonts[choice]
+    f2 = fonts2[choice]
 
     if len(text) == 7:
         upper_off = upper_offsets[choice][7]
@@ -167,8 +201,10 @@ def paint_text(text, w, p, aug=False, test=False, useabg=False, randfont=False):
     img = np.array(img_pil)
     if np.random.randn() > 0.75 and not useabg:
         img = image.random_rotation(img, 3 * w / w + 1)
+
+    blur_limit = 3 if useabg else 7
     if aug:
-        img = aug_img(img)
+        img = aug_img(img, blur_limit)
     alpha = 255
     if not test:
         img = img.astype('float32') / 255.
@@ -177,3 +213,90 @@ def paint_text(text, w, p, aug=False, test=False, useabg=False, randfont=False):
     if mil:
         img = alpha - img
     return img
+
+
+def paint_text2(text, w, p, aug=False, test=False, useabg=False, randfont=False, phuket=False):
+    if phuket and np.random.randn() > 0.25 or type(phuket) == int:
+        img, text, p = random_pk_image()
+        img_pil = Image.fromarray(img)
+        mil = 0
+        truck = 0
+        pk = 1
+    else:
+        pk = 0
+        truck = text[2] == '-'
+        img, white = random_bg(truck)
+        mil = (np.random.randn() > 0.8) & white & ord(text[-1]) > 300
+        # a = cv2.putText(bg_im)
+
+        if mil:
+            r = g = b = 0
+        else:
+            c = np.random.randn()
+            if c < 0.4:
+                r = g = b = 0
+            elif c < 0.75:
+                r = 0
+                g = 100
+                b = 10
+            else:
+                r = g = 0
+                b = 128
+        if truck:
+            r = g = b = 0
+        cv2.rectangle(img, (0, 0), (266, 115), (r, g, b), 4)
+
+        img_pil = Image.fromarray(img)
+        draw = ImageDraw.Draw(img_pil)
+
+        if not randfont:
+            choice = 0
+        else:
+            choice = np.random.randint(len(fonts))
+        f = fonts[choice]
+        f2 = fonts2[choice]
+
+        if len(text) == 7:
+            upper_off = upper_offsets[choice][7]
+        elif len(text) == 6:
+            upper_off = upper_offsets[choice][6]
+        elif len(text) == 5:
+            upper_off = upper_offsets[choice][5]
+        elif len(text) == 4:
+            upper_off = upper_offsets[choice][4]
+        else:
+            upper_off = upper_offsets[choice][-1]
+
+        draw.text((upper_off, upper_offsets[choice][0]), text, font=f, fill=(r, g, b, 255))
+        province = provinces[p]
+        draw.text((offsets[p] + np.random.randint(-5, 5), upper_offsets[choice]['p']), province, font=f2, fill=(r, g, b, 255))
+
+    if useabg:
+        img_pil = img_pil.resize((np.random.randint(120, 290), np.random.randint(90, 150)))
+        degree = np.random.randint(-20, 20)
+        mask = Image.new('L', img_pil.size, 255)
+        img_pil = img_pil.rotate(degree, expand=True)
+        mask = mask.rotate(degree, expand=True)
+        bg = Image.fromarray(random_auged_bg())
+        bg.paste(img_pil, (np.random.randint(50), np.random.randint(50)), mask=mask)
+        img_pil = bg.resize((270, 120))
+
+    img = np.array(img_pil)
+    if np.random.randn() > 0.75 and not useabg:
+        img = image.random_rotation(img, 3 * w / w + 1)
+
+    blur_limit = 1 if useabg else 3
+    if aug and pk:
+        img = aug_img(img, blur_limit)
+    alpha = 255
+    if not test:
+        img = img.astype('float32') / 255.
+        alpha = 1.
+
+    if mil:
+        img = alpha - img
+    if ord(text[1]) < 58:
+        text = text[:2]+' '+text[2:]
+    if truck:
+        img = cv2.resize(img, (270, 120))
+    return img, text, p

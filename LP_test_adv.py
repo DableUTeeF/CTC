@@ -10,6 +10,7 @@ from keras.models import Model
 from keras.layers.recurrent import GRU
 from PIL import Image
 import utils
+import cv2
 # alphabet = u'ABCDEFTHIJKLMNOPQRSTUVWXYZ0123456789 '
 alphabet = u'กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรฤลฦวศษสหฬอฮ๑๒๓๔๕๖๗๘๙๐0123456789 '
 os.environ['CUDA_VISIBLE_DEVICES'] = ""
@@ -124,7 +125,7 @@ def get_model(absolute_max_string_len, img_w, img_h=40):
 
     model = Model(inputs=[input_data, labels, input_length, label_length],
                   outputs=[loss_out, classifier])
-    model.load_weights('image_ocr_LP/2019:04:29:15:49:10/weights15.h5')
+    model.load_weights('image_ocr_LP/2019:04:29:19:16:28/weights15.h5')
 
     return test_func
 
@@ -132,11 +133,22 @@ def get_model(absolute_max_string_len, img_w, img_h=40):
 if __name__ == '__main__':
     w, h = 270, 120
     test_func = get_model(7, w, h)
-    image = Image.open('replate002.jpg').convert('RGB').resize((w, h))
-    im = np.array(image).astype('float32') / 255.
+
+    # image = cv2.imread('plates/plate.png')
+    # image = utils.aug_img(image)
+    # image = cv2.resize(image, (w, h))
+    # im = image.astype('float32') / 255.
+
+    image = utils.paint_text('รถ 2015', 120, 0, aug=True, test=False, useabg=False, randfont=False)
+    im = image
+
     im = np.rollaxis(im, 1)
+    ret = decode_batch(test_func, np.expand_dims(im, 0))
+    print(ret)
     ret = decode_batch(test_func, np.expand_dims(im[..., ::-1], 0))
     print(ret)
     im = Image.fromarray((im*255).astype('uint8'))
     im.show()
-    image.show()
+    # cv2.imshow('aa', image)
+    # cv2.waitKey()
+    # cv2.destroyAllWindows()

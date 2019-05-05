@@ -35,7 +35,6 @@ https://github.com/mbhenry/
 from __future__ import unicode_literals
 import os
 import itertools
-import codecs
 import utils
 import datetime
 import cairo
@@ -66,7 +65,7 @@ OUTPUT_DIR = 'image_ocr_LP'
 # character classes and matching regex filter
 regex = r'^[a-z ]+$'
 # alphabet = u'abcdefghijklmnopqrstuvwxyz '
-alphabet = u'กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรฤลฦวศษสหฬอฮ๑๒๓๔๕๖๗๘๙๐0123456789 '
+alphabet = u'กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดตถทธนบปผฝพฟภมยรฤลฦวศษสหฬอฮ๑๒๓๔๕๖๗๘๙๐0123456789- '
 
 np.random.seed(55)
 
@@ -235,10 +234,16 @@ class TextImageGenerator(keras.callbacks.Callback):
             else:
                 number = '๑๒๓๔๕๖๗๘๙๐'
             string = ''
-            string += alphabet[np.random.randint(len(alphabet) - 1)]
-            if np.random.randn() > 0.2:
+            if np.random.rand() < 0.75:
                 string += alphabet[np.random.randint(len(alphabet) - 1)]
-            string += ' '
+                if np.random.randn() > 0.2:
+                    string += alphabet[np.random.randint(len(alphabet) - 1)]
+                string += ' '
+            else:
+                string += str(np.random.randint(10))
+                string += str(np.random.randint(10))
+                string += '-'
+                length = 4
             for i in range(length):
                 string += number[np.random.randint(len(number) - 1)]
             return string
@@ -262,19 +267,19 @@ class TextImageGenerator(keras.callbacks.Callback):
         # width and height are backwards from typical Keras convention
         # because width is the time dimension when it gets fed into the RNN
         X_data = np.ones([size, 270, 120, 3])
-        Y_data = np.ones([size, 77])
+        Y_data = np.ones([size, 78])
         labels = np.ones([size, self.absolute_max_string_len])
         input_length = np.zeros([size, 1])
         label_length = np.zeros([size, 1])
         source_str = []
         for i in range(size):
-            province = np.random.randint(77)
-            Y_data[i] = to_categorical(province, 77)
-            X_data[i, :, :, :] = np.rollaxis(self.paint_func(self.X_text[index + i], province), 1)
+            data, X_text, province = self.paint_func(self.X_text[index + i], np.random.randint(78))
+            X_data[i, :, :, :] = np.rollaxis(data, 1)
+            Y_data[i] = to_categorical(province, 78)
             labels[i, :] = self.Y_data[index + i]
             input_length[i] = self.img_w // self.downsample_factor - 2
             label_length[i] = self.Y_len[index + i]
-            source_str.append(self.X_text[index + i])
+            source_str.append(X_text)
         inputs = {'the_input': X_data,
                   'the_labels': labels,
                   'input_length': input_length,
@@ -307,25 +312,25 @@ class TextImageGenerator(keras.callbacks.Callback):
 
     def on_train_begin(self, logs={}):
         self.build_word_list(16000, 4, 1)
-        self.paint_func = lambda text, p: utils.paint_text(
-            text, self.img_w, p)
+        self.paint_func = lambda text, p: utils.paint_text2(
+            text, self.img_w, p, phuket=1)
 
     def on_epoch_begin(self, epoch, logs={}):
         if epoch > 5:
-            self.paint_func = lambda text, p: utils.paint_text(
-                text, self.img_w, p, aug=True, useabg=False)
+            self.paint_func = lambda text, p: utils.paint_text2(
+                text, self.img_w, p, aug=False, useabg=False, phuket=True)
         if epoch > 10:
-            self.paint_func = lambda text, p: utils.paint_text(
-                text, self.img_w, p, aug=True, useabg=False, randfont=True)
+            self.paint_func = lambda text, p: utils.paint_text2(
+                text, self.img_w, p, aug=True, useabg=False, phuket=True, randfont=True)
         if epoch > 15:
-            self.paint_func = lambda text, p: utils.paint_text(
-                text, self.img_w, p, aug=False, useabg=True, randfont=False)
-        if epoch > 20:
-            self.paint_func = lambda text, p: utils.paint_text(
-                text, self.img_w, p, aug=True, useabg=True, randfont=False)
+            self.paint_func = lambda text, p: utils.paint_text2(
+                text, self.img_w, p, aug=True, useabg=False, phuket=True, randfont=True)
         if epoch > 25:
-            self.paint_func = lambda text, p: utils.paint_text(
-                text, self.img_w, p, aug=True, useabg=True, randfont=True)
+            self.paint_func = lambda text, p: utils.paint_text2(
+                text, self.img_w, p, aug=True, useabg=True, randfont=False, phuket=True)
+        if epoch > 35:
+            self.paint_func = lambda text, p: utils.paint_text2(
+                text, self.img_w, p, aug=True, useabg=True, randfont=True, phuket=True)
 
 
 # the actual loss calc occurs here despite it not being
@@ -416,10 +421,10 @@ def train(run_name, start_epoch, stop_epoch, img_w, img_h=120):
     val_words = int(words_per_epoch * val_split)
 
     # Network parameters
-    conv_filters = 16
+    conv_filters = 32
     kernel_size = (3, 3)
     pool_size = 2
-    time_dense_size = 32
+    time_dense_size = 64
     rnn_size = 512
     minibatch_size = 32
     # 270, 120
@@ -444,23 +449,29 @@ def train(run_name, start_epoch, stop_epoch, img_w, img_h=120):
     act = 'relu'
     input_data = Input(name='the_input', shape=input_shape, dtype='float32')
     inner = Conv2D(conv_filters, kernel_size, padding='same',
-                   activation=act, kernel_initializer='he_normal',
+                   kernel_initializer='he_normal',
                    name='conv1')(input_data)
+    inner = BatchNormalization(name='bn1')(inner)
+    inner = Activation(act, name='act1')(inner)
     inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max1')(inner)
     inner = Conv2D(conv_filters, kernel_size, padding='same',
-                   activation=act, kernel_initializer='he_normal',
+                   kernel_initializer='he_normal',
                    name='conv2')(inner)
+    inner = BatchNormalization(name='bn2')(inner)
+    inner = Activation(act, name='act2')(inner)
     inner = MaxPooling2D(pool_size=(pool_size, pool_size), name='max2')(inner)
-    classifier = Conv2D(64, 3, padding='same', activation=act, kernel_initializer='he_normal',
+    classifier = Conv2D(64, 3, padding='same', kernel_initializer='he_normal',
                         name='conv3')(inner)
     classifier = BatchNormalization(name='bn3')(classifier)
+    classifier = Activation(act, name='act3')(classifier)
     classifier = MaxPooling2D(pool_size=(pool_size, pool_size), name='max3')(classifier)
-    classifier = Conv2D(256, 3, padding='same', activation=act, kernel_initializer='he_normal',
+    classifier = Conv2D(256, 3, padding='same', kernel_initializer='he_normal',
                         name='conv4')(classifier)
+    classifier = Activation(act, name='act4')(classifier)
     classifier = BatchNormalization(name='bn4')(classifier)
     # classifier = MaxPooling2D(pool_size=(pool_size, pool_size), name='max4')(classifier)
     classifier = GlobalAveragePooling2D(name='avg_pool')(classifier)
-    classifier = Dense(77, activation='softmax', name='province')(classifier)
+    classifier = Dense(78, activation='softmax', name='province')(classifier)
     conv_to_rnn_dims = (img_w // (pool_size ** 2),
                         (img_h // (pool_size ** 2)) * conv_filters)
     inner = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(inner)
@@ -480,6 +491,12 @@ def train(run_name, start_epoch, stop_epoch, img_w, img_h=120):
                 kernel_initializer='he_normal', name='gru2')(gru1_merged)
     gru_2b = GRU(rnn_size, return_sequences=True, go_backwards=True,
                  kernel_initializer='he_normal', name='gru2_b')(gru1_merged)
+
+    # gru2_merged = add([gru_2, gru_2b])
+    # gru_3 = GRU(rnn_size, return_sequences=True,
+    #             kernel_initializer='he_normal', name='gru3')(gru2_merged)
+    # gru_3b = GRU(rnn_size, return_sequences=True, go_backwards=True,
+    #              kernel_initializer='he_normal', name='gru3_b')(gru2_merged)
 
     # transforms RNN output to character activations:
     inner = Dense(img_gen.get_output_size(), kernel_initializer='he_normal',
